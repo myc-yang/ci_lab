@@ -30,11 +30,23 @@
 #include "ci_lab_msgids.h"
 #include "ci_lab_version.h"
 #include "ci_lab_decode.h"
+#include "ci_lab_cmd_parser.h"
+
+#if defined(RTEMS_BUILD) && defined(STATIC_BUILD)
+#include "static_alloc.h"
+#elif !defined(RTEMS_BUILD) && !defined(STATIC_BUILD)
+    // Neither are defined - this is OK
+#else
+    // Error: One is defined but not the other
+    #error "Both RTEMS_BUILD and STATIC_BUILD must be defined together, or neither should be defined"
+#endif
 
 /*
 ** CI Global Data
 */
 CI_LAB_GlobalData_t CI_LAB_Global;
+
+cmd_pkt_parser_input_type ci_lab_parser_input = {&(CI_LAB_Global.NetBufPtr), &(CI_LAB_Global.OS_Recvd_Bytes)};
 
 /** * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 /*                                                                            */
@@ -184,6 +196,23 @@ void CI_LAB_TaskInit(void)
         }
     }
 
+    /*
+    ** Initialize Parser for Validationg the Uplink
+    */
+#if defined(RTEMS_BUILD) && defined(STATIC_BUILD)
+    h_static_alloc_init();
+    h_default_allocator = h_grammar_allocator;
+    h_default_parse_allocator = h_parse_allocator;
+#endif
+
+    CI_LAB_Global.Uplink_Validate_Parser = CI_LAB_Init_Cmd_Pkt_Parser(&ci_lab_parser_input);
+
+    if (CI_LAB_Global.Uplink_Validate_Parser == NULL)
+    {
+        printf("Parser failed\n");
+        //Need some sort of error message
+    }
+
     CI_LAB_ResetCounters_Internal();
 
     /*
@@ -231,7 +260,7 @@ void CI_LAB_ResetCounters_Internal(void)
 void CI_LAB_ReadUpLink(void)
 {
     int   i;
-    int32 OsStatus;
+    // int32 OsStatus;
 
     CFE_Status_t     CfeStatus;
     CFE_SB_Buffer_t *SBBufPtr;
@@ -248,15 +277,15 @@ void CI_LAB_ReadUpLink(void)
             break;
         }
 
-        OsStatus = OS_SocketRecvFrom(CI_LAB_Global.SocketID,
+        CI_LAB_Global.OS_Recvd_Bytes = OS_SocketRecvFrom(CI_LAB_Global.SocketID,
                                      CI_LAB_Global.NetBufPtr,
                                      CI_LAB_Global.NetBufSize,
                                      &CI_LAB_Global.SocketAddress,
                                      CI_LAB_PLATFORM_UPLINK_RECEIVE_TIMEOUT);
-        if (OsStatus > 0)
+        if (CI_LAB_Global.OS_Recvd_Bytes > 0)
         {
             CFE_ES_PerfLogEntry(CI_LAB_SOCKET_RCV_PERF_ID);
-            CfeStatus = CI_LAB_DecodeInputMessage(CI_LAB_Global.NetBufPtr, OsStatus, &SBBufPtr);
+            CfeStatus = CI_LAB_DecodeInputMessage(CI_LAB_Global.NetBufPtr, CI_LAB_Global.OS_Recvd_Bytes, &SBBufPtr);
             if (CfeStatus != CFE_SUCCESS)
             {
                 CI_LAB_Global.HkTlm.Payload.IngestErrors++;

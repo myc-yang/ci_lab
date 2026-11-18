@@ -43,6 +43,9 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include "hammer.h"
+#include "glue.h"
+
 /************************************************************************
  * Macro Definitions
  ************************************************************************/
@@ -64,6 +67,8 @@ typedef struct
 
     void  *NetBufPtr;
     size_t NetBufSize;
+    int32 OS_Recvd_Bytes;
+    HParser *Uplink_Validate_Parser;
 
 } CI_LAB_GlobalData_t;
 

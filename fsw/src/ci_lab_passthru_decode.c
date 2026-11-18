@@ -30,6 +30,17 @@
 #include "ci_lab_perfids.h"
 #include "ci_lab_msgids.h"
 #include "ci_lab_decode.h"
+#include "hammer.h"
+#include "glue.h"
+
+#if defined(RTEMS_BUILD) && defined(STATIC_BUILD)
+#include "static_alloc.h"
+#elif !defined(RTEMS_BUILD) && !defined(STATIC_BUILD)
+    // Neither are defined - this is OK
+#else
+    // Error: One is defined but not the other
+    #error "Both RTEMS_BUILD and STATIC_BUILD must be defined together, or neither should be defined"
+#endif
 
 /*
  * ---------------------------------------
@@ -75,41 +86,27 @@ CFE_Status_t CI_LAB_GetInputBuffer(void **BufferOut, size_t *SizeOut)
  */
 CFE_Status_t CI_LAB_DecodeInputMessage(void *SourceBuffer, size_t SourceSize, CFE_SB_Buffer_t **DestBufferOut)
 {
-    CFE_SB_Buffer_t *MsgBufPtr;
-    CFE_MSG_Size_t   MsgSize;
-    CFE_Status_t     Status;
+    HParseResult* cmd_pkt_result __attribute__((unused)) = h_parse(CI_LAB_Global.Uplink_Validate_Parser, SourceBuffer, SourceSize);
 
-    if (SourceSize < sizeof(CFE_MSG_CommandHeader_t))
+#if defined(RTEMS_BUILD) && defined(STATIC_BUILD)
+    h_parse_pool_reset();
+#endif
+
+    if (cmd_pkt_result)
     {
-        MsgBufPtr = NULL;
-        Status    = CFE_STATUS_WRONG_MSG_LENGTH;
+#if !defined(RTEMS_BUILD) && !defined(STATIC_BUILD)
+        h_parse_result_free(cmd_pkt_result);
+#endif
 
-        CFE_EVS_SendEvent(CI_LAB_INGEST_LEN_ERR_EID,
-                          CFE_EVS_EventType_ERROR,
-                          "CI: cmd dropped, bad packet length=%lu\n",
-                          (unsigned long)SourceSize);
+        *DestBufferOut = SourceBuffer;
+        return CFE_SUCCESS;
     }
-    else
-    {
-        MsgBufPtr = SourceBuffer;
-        MsgSize   = 0;
+    else{
+#if !defined(RTEMS_BUILD) && !defined(STATIC_BUILD)
+        h_parse_result_free(cmd_pkt_result);
+#endif
 
-        /* Check the size from within the header itself, compare against network buffer size */
-        Status = CFE_MSG_GetSize(&MsgBufPtr->Msg, &MsgSize);
-
-        if ((Status == CFE_SUCCESS) && (MsgSize > SourceSize))
-        {
-            Status = CFE_STATUS_WRONG_MSG_LENGTH;
-
-            CFE_EVS_SendEvent(CI_LAB_INGEST_LEN_ERR_EID,
-                              CFE_EVS_EventType_ERROR,
-                              "CI: cmd dropped - length mismatch, %lu (hdr) / %lu (packet)\n",
-                              (unsigned long)MsgSize,
-                              (unsigned long)SourceSize);
-        }
+        *DestBufferOut = NULL;
+        return CFE_SUCCESS - 1;
     }
-
-    *DestBufferOut = MsgBufPtr;
-
-    return Status;
 }
